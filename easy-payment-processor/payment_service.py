@@ -77,31 +77,34 @@ class PaymentProcessor:
         
         # BUG ALERT: Check if this payment was already processed
         # Is this check happening at the right time?
-        if idempotency_key in self.processed_payments:
-            return self.processed_payments[idempotency_key]
         
-        # Check if user exists and has sufficient balance
-        if user_id not in self.balances:
-            raise ValueError(f"Account {user_id} does not exist")
         
-        # BUG ALERT: This balance check and deduction is not atomic!
-        # What happens if multiple threads execute this simultaneously?
-        current_balance = self.balances[user_id]
-        if current_balance < amount:
-            result = PaymentResult(
-                success=False,
-                transaction_id="",
-                amount=amount,
-                message=f"Insufficient funds. Balance: {current_balance}, Required: {amount}",
-                timestamp=datetime.now()
-            )
-            return result
-        
-        # Deduct the amount
-        self.balances[user_id] = current_balance - amount
-        
-        # Generate transaction ID
+
         with self.lock:
+                
+            if idempotency_key in self.processed_payments:
+                return self.processed_payments[idempotency_key]
+            # Check if user exists and has sufficient balance
+            if user_id not in self.balances:
+                raise ValueError(f"Account {user_id} does not exist")
+            
+            # BUG ALERT: This balance check and deduction is not atomic!
+            # What happens if multiple threads execute this simultaneously?
+            current_balance = self.balances[user_id]
+            if current_balance < amount:
+                result = PaymentResult(
+                    success=False,
+                    transaction_id="",
+                    amount=amount,
+                    message=f"Insufficient funds. Balance: {current_balance}, Required: {amount}",
+                    timestamp=datetime.now()
+                )
+                return result
+            
+            # Deduct the amount
+            self.balances[user_id] = current_balance - amount
+            
+            # Generate transaction ID
             self.transaction_counter += 1
             transaction_id = f"txn_{self.transaction_counter:06d}"
         
@@ -141,22 +144,27 @@ class PaymentProcessor:
         """
         if amount <= 0:
             raise ValueError("Refund amount must be positive")
+    
+        with self.lock:
+            if idempotency_key in self.processed_payments:
+                return self.processed_payments[idempotency_key]
+            if user_id not in self.balances:
+                    raise ValueError(f"Account {user_id} does not exist")
+            self.balances[user_id ] += amount
+            
+            self.transaction_counter += 1
+            transaction_id = f"txn_{self.transaction_counter:06d}"
+
+            result = PaymentResult(
+                success=True,
+                transaction_id=transaction_id,
+                amount=amount,
+                message=f"Refund processed successfully {original_transaction_id}",
+                timestamp=datetime.now()
+            )
         
-        # TODO: Check if this refund was already processed (idempotency)
-        # HINT: Similar to process_payment, but for refunds
-        
-        # TODO: Verify user exists
-        
-        # TODO: Add the amount back to the user's balance
-        # HINT: Think about thread safety!
-        
-        # TODO: Generate a transaction ID for the refund
-        
-        # TODO: Create and store the result
-        
-        # TODO: Return the result
-        
-        raise NotImplementedError("Refund functionality not yet implemented")
+        self.processed_payments[idempotency_key] = result
+        return result
     
     def get_transaction_count(self) -> int:
         """Get total number of transactions processed"""
