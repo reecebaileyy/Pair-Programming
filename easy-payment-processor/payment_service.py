@@ -171,3 +171,4 @@ class PaymentProcessor:
         with self.lock:
             return self.transaction_counter
 
+
