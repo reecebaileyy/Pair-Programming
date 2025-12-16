@@ -79,18 +79,26 @@ class DistributedLockManager:
             # Check if lock exists
             if lock_key in self.locks:
                 existing_lock = self.locks[lock_key]
+
+                if existing_lock.is_expired():
+                    del self.locks[lock_key]
+                elif existing_lock.holder_id == holder_id:
+                    existing_lock.acquired_at = time.time()
+                    return True  # Reentrant acquisition by same holder
+                else:
+                    return False
                 
                 # TODO: Check if expired
                 # If expired, clean up and allow acquisition
                 # If not expired and held by someone else, return False
                 # If held by same holder, allow (reentrant)
-                
-                pass  # Remove this and implement!
             
             # TODO: Acquire the lock
-            # Store LockInfo in self.locks
+            self.locks[lock_key] = LockInfo(lock_key, holder_id, time.time(), ttl_seconds)
             
-            pass  # Remove this and implement!
+            return True
+
+        
         
         # TEMPORARY: Return True to allow tests to run
         # You should replace this with proper logic!

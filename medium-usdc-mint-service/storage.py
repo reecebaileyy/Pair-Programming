@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Dict, Optional, List
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 @dataclass
@@ -108,6 +108,10 @@ class Storage:
                 raise ValueError(f"Mint {record.mint_id} already recorded")
             self.mint_ledger[record.mint_id] = record
     
+    def update_mint(self, record: MintRecord) -> None:
+        with self.counter_lock:
+            self.mint_ledger[record.mint_id] = record
+    
     def get_mint(self, mint_id: str) -> Optional[MintRecord]:
         """Get a mint record"""
         with self.counter_lock:
@@ -117,6 +121,10 @@ class Storage:
         """Get all mints for an account"""
         with self.counter_lock:
             return [m for m in self.mint_ledger.values() if m.account_id == account_id]
+    
+    def get_recent_mints(self, account_id, curr_timestamp: int) -> List[MintRecord]:
+        with self.counter_lock:
+            return [m for m in self.mint_ledger.values() if m.account_id == account_id and m.timestamp >= (curr_timestamp - timedelta(seconds=1))]
     
     def store_idempotency_token(
         self, 

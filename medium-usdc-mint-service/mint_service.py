@@ -83,8 +83,14 @@ class MintService:
                 )
         
         # TODO: Check rate limit before processing
-        # if self._check_rate_limit(account_id):
-        #     return MintResult(...)
+        if self._check_rate_limit(account_id):
+             return MintResult(
+                    success=False,
+                    mint_id=None,
+                    amount=None,
+                    message="Rate Limit Exceeded",
+                    timestamp=datetime.now()
+                )
         
         # Acquire account lock for thread safety
         account_lock = self.storage.get_account_lock(account_id)
@@ -150,18 +156,16 @@ class MintService:
         
         # BUG: Lock order depends on parameter order!
         # This can cause circular wait conditions
-        from_lock = self.storage.get_account_lock(from_account)
-        to_lock = self.storage.get_account_lock(to_account)
+        first_lock, second_lock = sorted([from_account, to_account])
+        first_lock = self.storage.get_account_lock(first_lock)
+        second_lock = self.storage.get_account_lock(second_lock)
         
-        with from_lock:
-            # Check sufficient balance
-            from_balance = self.storage.get_balance(from_account)
-            if from_balance < amount:
-                return False
-            
-            # BUG: Acquiring second lock while holding first lock
-            # If another thread does opposite order = deadlock
-            with to_lock:
+        with first_lock:
+            with second_lock:
+                # Check sufficient balance
+                from_balance = self.storage.get_balance(from_account)
+                if from_balance < amount:
+                    return False
                 # Perform transfer
                 self.storage.add_to_balance(from_account, -amount)
                 self.storage.add_to_balance(to_account, amount)
@@ -187,8 +191,10 @@ class MintService:
         # 2. Count how many mints in last 1 second
         # 3. If >= MAX_MINTS_PER_SECOND, reject
         # 4. Clean up old timestamps
-        
-        raise NotImplementedError("Rate limiting not implemented")
+        mints = self.storage.get_recent_mints(account_id, datetime.now())
+        if len(mints) >= MintService.MAX_MINTS_PER_SECOND:
+            return True
+        return False
     
     def reconcile_failed_mint(self, mint_id: str) -> bool:
         """
@@ -207,12 +213,37 @@ class MintService:
         # TODO: Implement this!
         # Hints:
         # 1. Look up the mint record
+        mint_record = self.storage.get_mint(mint_id)
+        if not mint_record:
+            return False
+        account_lock = self.storage.get_account_lock(mint_record.account_id)
         # 2. Check current account balance
-        # 3. Reverse the mint (subtract the amount)
-        # 4. Update the mint status
-        # 5. Clean up idempotency token
         
-        raise NotImplementedError("Reconciliation not implemented")
+        with account_lock:
+            current_balance = self.storage.get_balance(mint_record.account_id)
+            if current_balance < mint_record.amount:
+                return False  
+            # 3. Reverse the mint (subtract the amount)
+            self.storage.add_to_balance(mint_record.account_id, -mint_record.amount)
+        
+        # 4. Update the mint status
+        record = MintRecord(
+                mint_id=mint_id,
+                account_id=mint_record.account_id,
+                amount=0,
+                blockchain=mint_record.blockchain,
+                timestamp=datetime.now(),
+                idempotency_token=mint_record.idempotency_token
+            )
+            
+        # Record in ledger
+        self.storage.update_mint(record)
+        # 5. Clean up idempotency token
+        if mint_record.idempotency_token:
+            self.storage.cleanup_expired_tokens()
+        
+        return True
+        
     
     def get_account_balance(self, account_id: str) -> float:
         """Get current USDC balance for an account"""
