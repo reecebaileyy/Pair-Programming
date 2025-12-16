@@ -154,6 +154,9 @@ class MintService:
         if amount <= 0:
             raise ValueError("Transfer amount must be positive")
         
+        if from_account == to_account:
+            return True
+        
         # BUG: Lock order depends on parameter order!
         # This can cause circular wait conditions
         first_lock, second_lock = sorted([from_account, to_account])
